@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>핑퐁 게임</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+        }
+
+        #gameContainer {
+            text-align: center;
+        }
+
+        canvas {
+            background-color: #000;
+            border: 3px solid #fff;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        #score {
+            color: white;
+            font-size: 24px;
+            margin-top: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        #startButton {
+            margin-top: 10px;
+            padding: 12px 30px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.3s;
+        }
+
+        #startButton:hover {
+            background-color: #45a049;
+        }
+
+        #instructions {
+            color: white;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="score">플레이어: 0 | 컴퓨터: 0</div>
+        <button id="startButton">게임 시작</button>
+        <div id="instructions">마우스를 움직여 패들을 조작하세요 | 클릭하여 서브</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const scoreDisplay = document.getElementById('score');
+
+        // 게임 상태
+        let gameRunning = false;
+        let playerScore = 0;
+        let computerScore = 0;
+        let ballInMotion = false; // 공이 움직이는지 여부
+
+        // 패들 설정
+        const paddleWidth = 10;
+        const paddleHeight = 100;
+        const paddleSpeed = 5;
+
+        // 플레이어 패들
+        const player = {
+            x: 20,
+            y: canvas.height / 2 - paddleHeight / 2,
+            width: paddleWidth,
+            height: paddleHeight,
+            dy: 0
+        };
+
+        // 컴퓨터 패들
+        const computer = {
+            x: canvas.width - 30,
+            y: canvas.height / 2 - paddleHeight / 2,
+            width: paddleWidth,
+            height: paddleHeight,
+            dy: 6, // 더 빠른 속도
+            reactionDelay: 0, // 반응 지연
+            targetY: canvas.height / 2 // 목표 위치
+        };
+
+        // 공 설정
+        const ball = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            radius: 8,
+            speed: 5,
+            dx: 5,
+            dy: 5
+        };
+
+        // 마우스 위치 추적
+        let mouseY = canvas.height / 2;
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseY = e.clientY - rect.top;
+        });
+
+        // 마우스 클릭으로 서브
+        canvas.addEventListener('click', () => {
+            if (gameRunning && !ballInMotion) {
+                ballInMotion = true;
+            }
+        });
+
+        // 패들 그리기
+        function drawPaddle(x, y, width, height) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(x, y, width, height);
+        }
+
+        // 공 그리기
+        function drawBall(x, y, radius) {
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 중앙선 그리기
+        function drawCenterLine() {
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // 플레이어 패들 업데이트
+        function updatePlayer() {
+            player.y = mouseY - player.height / 2;
+
+            // 경계 체크
+            if (player.y < 0) player.y = 0;
+            if (player.y + player.height > canvas.height) {
+                player.y = canvas.height - player.height;
+            }
+        }
+
+        // 컴퓨터 패들 업데이트 (개선된 AI)
+        function updateComputer() {
+            if (!ballInMotion) return;
+
+            // 공이 AI 쪽으로 오는지 확인
+            const ballComingToAI = ball.dx > 0;
+
+            if (ballComingToAI) {
+                // 공의 예측 위치 계산
+                const predictedY = predictBallPosition();
+                computer.targetY = predictedY;
+            } else {
+                // 공이 반대편에 있을 때는 중앙으로 이동
+                computer.targetY = canvas.height / 2;
+            }
+
+            // 부드러운 움직임을 위한 보간
+            const computerCenter = computer.y + computer.height / 2;
+            const diff = computer.targetY - computerCenter;
+
+            // 반응 속도 조절 (너무 완벽하지 않게)
+            const moveSpeed = Math.min(Math.abs(diff) * 0.15, computer.dy);
+
+            if (Math.abs(diff) > 10) {
+                if (diff > 0) {
+                    computer.y += moveSpeed;
+                } else {
+                    computer.y -= moveSpeed;
+                }
+            }
+
+            // 경계 체크
+            if (computer.y < 0) computer.y = 0;
+            if (computer.y + computer.height > canvas.height) {
+                computer.y = canvas.height - computer.height;
+            }
+        }
+
+        // 공의 도착 위치 예측
+        function predictBallPosition() {
+            // 공의 현재 상태 복사
+            let tempX = ball.x;
+            let tempY = ball.y;
+            let tempDx = ball.dx;
+            let tempDy = ball.dy;
+
+            // AI 패들까지의 거리 계산
+            const steps = Math.abs((computer.x - tempX) / tempDx);
+
+            // 시뮬레이션
+            for (let i = 0; i < steps; i++) {
+                tempX += tempDx;
+                tempY += tempDy;
+
+                // 벽 반사 계산
+                if (tempY <= 0 || tempY >= canvas.height) {
+                    tempDy *= -1;
+                }
+
+                // AI 패들 위치에 도달하면 Y 위치 반환
+                if (tempX >= computer.x) {
+                    // 약간의 랜덤성 추가 (완벽하지 않게)
+                    const randomOffset = (Math.random() - 0.5) * 20;
+                    return Math.max(computer.height / 2,
+                           Math.min(canvas.height - computer.height / 2, tempY + randomOffset));
+                }
+            }
+
+            return tempY;
+        }
+
+        // 공 업데이트
+        function updateBall() {
+            if (!ballInMotion) return; // 공이 정지 상태면 업데이트 안 함
+
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // 위아래 벽 충돌
+            if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) {
+                ball.dy *= -1;
+            }
+
+            // 플레이어 패들 충돌
+            if (ball.x - ball.radius < player.x + player.width &&
+                ball.y > player.y &&
+                ball.y < player.y + player.height &&
+                ball.dx < 0) {
+                ball.dx *= -1;
+                ball.dx *= 1.05; // 속도 증가
+                ball.dy *= 1.05;
+            }
+
+            // 컴퓨터 패들 충돌
+            if (ball.x + ball.radius > computer.x &&
+                ball.y > computer.y &&
+                ball.y < computer.y + computer.height &&
+                ball.dx > 0) {
+                ball.dx *= -1;
+                ball.dx *= 1.05;
+                ball.dy *= 1.05;
+            }
+
+            // 득점 체크
+            if (ball.x - ball.radius < 0) {
+                computerScore++;
+                resetBall();
+                updateScore();
+            } else if (ball.x + ball.radius > canvas.width) {
+                playerScore++;
+                resetBall();
+                updateScore();
+            }
+        }
+
+        // 공 리셋
+        function resetBall() {
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height / 2;
+            ball.speed = 5;
+            ball.dx = (Math.random() > 0.5 ? 1 : -1) * 5;
+            ball.dy = (Math.random() > 0.5 ? 1 : -1) * 5;
+            ballInMotion = false; // 공을 정지 상태로 설정
+        }
+
+        // 점수 업데이트
+        function updateScore() {
+            scoreDisplay.textContent = `플레이어: ${playerScore} | 컴퓨터: ${computerScore}`;
+        }
+
+        // 게임 그리기
+        function draw() {
+            // 캔버스 초기화
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 중앙선
+            drawCenterLine();
+
+            // 패들과 공 그리기
+            drawPaddle(player.x, player.y, player.width, player.height);
+            drawPaddle(computer.x, computer.y, computer.width, computer.height);
+            drawBall(ball.x, ball.y, ball.radius);
+        }
+
+        // 게임 루프
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            updatePlayer();
+            updateComputer();
+            updateBall();
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 게임 시작/정지
+        startButton.addEventListener('click', () => {
+            gameRunning = !gameRunning;
+
+            if (gameRunning) {
+                startButton.textContent = '일시정지';
+                gameLoop();
+            } else {
+                startButton.textContent = '게임 재시작';
+            }
+        });
+
+        // 초기 화면 그리기
+        draw();
+    </script>
+</body>
+</html>
